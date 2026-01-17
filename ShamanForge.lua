@@ -82,8 +82,8 @@ end
 
 local function __sf_get_netstats()
   if type(GetNetStats) == "function" then
-    local a, b, c, d = GetNetStats()
-    return a, b, c, d
+    local bandwidthIn, bandwidthOut, lagHome, lagWorld = GetNetStats()
+    return bandwidthIn, bandwidthOut, lagHome, lagWorld
   end
   return nil
 end
@@ -92,12 +92,31 @@ local function __sf_get_queue_window()
   local _, _, lagHome, lagWorld = __sf_get_netstats()
   local lag = lagWorld or lagHome or 0
   local jitter = 0
-  local window = (lag + jitter) / 1000
-  return window, lag, jitter
+  local windowMs
+  if type(__SF_REAL_G.NP_SpellQueueWindowMs) == "number" then
+    windowMs = __SF_REAL_G.NP_SpellQueueWindowMs
+  elseif type(GetCVar) == "function" then
+    local cvarWindow = tonumber(GetCVar("SpellQueueWindow"))
+    if cvarWindow and cvarWindow > 0 then
+      windowMs = cvarWindow
+    end
+  end
+  if not windowMs then
+    windowMs = lag + jitter
+  end
+  return windowMs / 1000, lag, jitter, windowMs
 end
 
 local function __sf_nampower_available()
   return type(QueueSpellByName) == "function"
+end
+
+local function __sf_get_nampower_version()
+  if type(GetNampowerVersion) == "function" then
+    local major, minor, patch = GetNampowerVersion()
+    return tostring(major) .. "." .. tostring(minor) .. "." .. tostring(patch)
+  end
+  return nil
 end
 
 function ShamanForge:QueueSpell(spellName)
@@ -127,12 +146,24 @@ function ShamanForge:PrintDiag()
   local hash = __SF_REAL_G.hash_SlashCmdList
   local hashSf = type(hash) == "table" and hash["sf"]
   local hasQueue = __sf_nampower_available()
-  local window, lag, jitter = __sf_get_queue_window()
+  local window, lag, jitter, windowMs = __sf_get_queue_window()
+  local npVersion = __sf_get_nampower_version()
   local cvarQueueCooldown
   local cvarQueueGcd
   if type(GetCVar) == "function" then
     cvarQueueCooldown = GetCVar("QueueOnCooldown")
     cvarQueueGcd = GetCVar("QueueOnGCD")
+  end
+  local castSpellId
+  local castRemainingMs
+  local gcdRemainingMs
+  if type(GetCastInfo) == "function" then
+    local castInfo = GetCastInfo()
+    if castInfo then
+      castSpellId = castInfo.spellId
+      castRemainingMs = castInfo.castRemainingMs
+      gcdRemainingMs = castInfo.gcdRemainingMs
+    end
   end
 
   __sf_print("[ShamanForge] marker=" .. tostring(marker))
@@ -141,8 +172,9 @@ function ShamanForge:PrintDiag()
   __sf_print("[ShamanForge] RotationStep=" .. tostring(rawget(__SF_REAL_G, "ShamanForge_RotationStep")) .. " type=" .. type(rawget(__SF_REAL_G, "ShamanForge_RotationStep")))
   __sf_print("[ShamanForge] slash registered=" .. tostring(hasSlash) .. " hash_sf=" .. tostring(hashSf))
   __sf_print("[ShamanForge] hooks RunLine=" .. tostring(self.__hooks.RunLine) .. " ChatEdit=" .. tostring(self.__hooks.ChatEdit))
-  __sf_print("[ShamanForge] NamPower queue=" .. tostring(hasQueue) .. " ping_ms=" .. tostring(lag or 0) .. " jitter_ms=" .. tostring(jitter) .. " window_s=" .. string.format("%.3f", window))
+  __sf_print("[ShamanForge] NamPower queue=" .. tostring(hasQueue) .. " version=" .. tostring(npVersion) .. " ping_ms=" .. tostring(lag or 0) .. " jitter_ms=" .. tostring(jitter) .. " window_ms=" .. tostring(windowMs) .. " window_s=" .. string.format("%.3f", window))
   __sf_print("[ShamanForge] SuperWoW_LOS_MASK=" .. tostring(self.SuperWoW_LOS_MASK))
+  __sf_print("[ShamanForge] cast spell_id=" .. tostring(castSpellId) .. " cast_remaining_ms=" .. tostring(castRemainingMs) .. " gcd_remaining_ms=" .. tostring(gcdRemainingMs))
   if cvarQueueCooldown or cvarQueueGcd then
     __sf_print("[ShamanForge] CVars QueueOnCooldown=" .. tostring(cvarQueueCooldown) .. " QueueOnGCD=" .. tostring(cvarQueueGcd))
   end
